@@ -2682,7 +2682,8 @@ void VR::on_draw_sidebar_entry(std::string_view name) {
             const auto scale_render = m_grow_rectangle_for_projection_cropping->draw("Scale Render Target");
             const auto scale_render_changed = get_runtime()->is_modifying_eye_texture_scale != scale_render;
             get_runtime()->is_modifying_eye_texture_scale = scale_render;
-            get_runtime()->should_recalculate_eye_projections = horizontal_projection_changed || vertical_projection_changed || scale_render_changed;
+            // OR in -- this runs every frame the page is drawn and must not clobber a pending request.
+            get_runtime()->should_recalculate_eye_projections |= horizontal_projection_changed || vertical_projection_changed || scale_render_changed;
 
             ImGui::TreePop();
         }

@@ -390,9 +390,7 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
     }
 
     const auto is_2d_screen = vr->is_using_2d_screen();
-    // Spatial (OpenXR) reuses the 2D-screen frame structure: content on quads, projection layer black.
-    const auto is_spatial_screen = vr->is_using_spatial() && runtime->is_openxr();
-    const auto is_screen_capture = is_2d_screen || is_spatial_screen;
+    const auto is_screen_capture = vr->is_using_screen_capture();
 
     auto draw_2d_view = [&]() {
         if (!is_screen_capture || !m_engine_tex_ref.has_texture() || !m_engine_tex_ref.has_srv()) {
@@ -737,7 +735,7 @@ vr::EVRCompositorError D3D11Component::on_frame(VR* vr) {
             // aperture by generate_slate_quad) over a real-but-black projection layer. One quad per
             // eye keeps the aperture edge flush; the projection layer keeps runtimes that mishandle
             // quad-only frames (Oculus) anchored.
-            if (vr->is_using_spatial() || vr->m_2d_screen_mode->value()) {
+            if (vr->is_using_screen_capture()) {
                 const auto left_layer = openxr_overlay.generate_slate_layer(runtimes::OpenXR::SwapchainIndex::UI, XrEyeVisibility::XR_EYE_VISIBILITY_LEFT);
                 const auto right_layer = openxr_overlay.generate_slate_layer(runtimes::OpenXR::SwapchainIndex::UI_RIGHT, XrEyeVisibility::XR_EYE_VISIBILITY_RIGHT);
 

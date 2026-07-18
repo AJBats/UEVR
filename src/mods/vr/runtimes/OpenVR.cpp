@@ -301,7 +301,8 @@ void OpenVR::update_spatial_projections(float nearz) {
         this->set_spatial_projection(eye, glm::vec3{eye_to_absolute[3]}, aperture, nearz);
     }
 
-    this->should_recalculate_eye_projections = false;
+    // Deliberately leave should_recalculate_eye_projections alone: a pending request (e.g. the
+    // spatial toggle) must survive until the cached path re-derives the normal projections.
 }
 
 void OpenVR::destroy() {

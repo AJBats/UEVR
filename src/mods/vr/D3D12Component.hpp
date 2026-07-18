@@ -175,6 +175,9 @@ private:
         {
             this->copy(swapchain_idx, src, std::nullopt, std::nullopt, src_state, src_box);
         }
+
+        // Acquire + clear to black + release, without a source copy (2D/spatial projection layers).
+        void clear(uint32_t swapchain_idx);
         void wait_for_all_copies() {
             std::scoped_lock _{this->mtx};
 
@@ -204,6 +207,8 @@ private:
             uint32_t num_textures_acquired{0};
             uint32_t last_acquired_texture{0};
             bool ever_acquired{false};
+            // Requested (view) format for RTVs -- the runtime's images may be typeless.
+            DXGI_FORMAT rtv_format{DXGI_FORMAT_UNKNOWN};
         };
 
         std::unordered_map<uint32_t, SwapchainContext> contexts{};

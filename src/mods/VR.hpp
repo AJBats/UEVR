@@ -601,6 +601,14 @@ public:
         return true;
     }
 
+    // Composited "content screen" frame: world (+UI) captured into the 2D-screen textures and shown
+    // on quad layers over a black projection layer. 2D mode on any runtime; spatial rides this path
+    // only on OpenXR (OpenVR spatial displays via its own overlay). Single source for capture,
+    // swapchain routing, and quad opacity -- keep them agreeing.
+    bool is_using_screen_capture() const {
+        return is_using_2d_screen() || (is_using_spatial() && get_runtime()->is_openxr());
+    }
+
     // Spatial Size: display-only shrink of the aperture quad (1.0 = life-size). The same content on
     // a smaller quad shrinks world + UI together into a coherent miniature; the render is untouched.
     float get_spatial_size() const { return m_spatial_size->value(); }

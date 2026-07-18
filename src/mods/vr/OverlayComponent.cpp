@@ -927,7 +927,10 @@ std::optional<std::reference_wrapper<XrCompositionLayerQuad>> OverlayComponent::
     layer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
     const auto& ui_swapchain = vr->m_openxr->swapchains[(uint32_t)swapchain];
     layer.subImage.swapchain = ui_swapchain.handle;
-    layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    // 2D/spatial: the quad is a solid virtual screen carrying the composited world (+UI); the scene's
+    // backbuffer alpha is meaningless (often 0), so submit opaque -- mirrors the OpenVR SpatialWorld
+    // overlay's IgnoreTextureAlpha. The normal-VR UI slate stays source-alpha.
+    layer.layerFlags = vr->is_using_screen_capture() ? 0 : XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     layer.subImage.imageRect.offset.x = 0;
     layer.subImage.imageRect.offset.y = 0;
     layer.subImage.imageRect.extent.width = ui_swapchain.width;
@@ -1039,7 +1042,8 @@ std::optional<std::reference_wrapper<XrCompositionLayerCylinderKHR>> OverlayComp
     layer.type = XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR;
     const auto& ui_swapchain = vr->m_openxr->swapchains[(uint32_t)swapchain];
     layer.subImage.swapchain = ui_swapchain.handle;
-    layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    // Carries the composited world in 2D mode -- same opaque rule as the quad.
+    layer.layerFlags = vr->is_using_screen_capture() ? 0 : XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     layer.subImage.imageRect.offset.x = 0;
     layer.subImage.imageRect.offset.y = 0;
     layer.subImage.imageRect.extent.width = ui_swapchain.width;
