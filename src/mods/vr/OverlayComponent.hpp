@@ -39,7 +39,7 @@ public:
     }
 
     const auto& get_framework_intersect_state() const {
-        return m_intersect_state;
+        return m_framework_intersect_state;
     }
 
     bool should_invert_ui_alpha() const {

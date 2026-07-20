@@ -613,6 +613,37 @@ public:
     // a smaller quad shrinks world + UI together into a coherent miniature; the render is untouched.
     float get_spatial_size() const { return m_spatial_size->value(); }
 
+    // Clear color for the screen-capture void (the projection layer / blacked eyes behind the content
+    // quads), in LINEAR space ready for ClearRenderTargetView on the sRGB render targets. Black
+    // normally; with Passthrough Void enabled it becomes the user's chroma key so runtimes like
+    // Virtual Desktop can composite camera passthrough in its place.
+    // The chroma-key void is live: the void clears take the key instead of black. OpenXR consumes
+    // it in any screen-capture mode; OpenVR only via the spatial eye submissions (2D on OpenVR has
+    // no void surface, so the key would be computed for nothing there).
+    bool is_chroma_void_active() const {
+        if (!m_void_passthrough->value()) {
+            return false;
+        }
+
+        if (!get_runtime()->is_openxr()) {
+            return is_using_spatial();
+        }
+
+        return is_using_screen_capture();
+    }
+
+    // Key border + content inset on the window texture: only where content rides quad layers.
+    bool is_chroma_pad_active() const {
+        return is_chroma_void_active() && get_runtime()->is_openxr();
+    }
+
+    glm::vec4 get_screen_capture_clear_color() const;
+
+    // The configured chroma key, ungated. sRGB variant for UNORM-view surfaces (screen textures --
+    // also the space the runtime's chroma filter sees); linear for sRGB-view clears.
+    glm::vec4 get_void_key_color_srgb() const;
+    glm::vec4 get_void_key_color_linear() const;
+
     // Cached UI/slate plane. Written on the game thread; read by render/present threads which hold
     // pose_mtx and must NOT re-lock it. Its own mutex prevents torn reads while the plane moves.
     vrmod::OverlayComponent::UIPlaneTransform get_spatial_ui_plane() const {
@@ -946,6 +977,8 @@ private:
     const ModToggle::Ptr m_2d_screen_mode{ ModToggle::create(generate_name("2DScreenMode"), false) };
     const ModToggle::Ptr m_spatial_mode{ ModToggle::create(generate_name("SpatialMode"), false) };
     const ModSlider::Ptr m_spatial_size{ ModSlider::create(generate_name("SpatialSize"), 0.1f, 1.0f, 1.0f) };
+    const ModToggle::Ptr m_void_passthrough{ ModToggle::create(generate_name("PassthroughVoid"), false) };
+    const ModInt32::Ptr m_void_color{ ModInt32::create(generate_name("PassthroughVoidColor"), 0xFF00FF) };
     const ModToggle::Ptr m_spatial_decoupled_pitch{ ModToggle::create(generate_name("SpatialDecoupledPitch"), false) };
     vrmod::OverlayComponent::UIPlaneTransform m_spatial_ui_plane{};
     mutable std::shared_mutex m_spatial_ui_plane_mtx{};
@@ -1098,6 +1131,8 @@ public:
             *m_2d_screen_mode,
             *m_spatial_mode,
             *m_spatial_size,
+            *m_void_passthrough,
+            *m_void_color,
             *m_spatial_decoupled_pitch,
             *m_roomscale_movement,
             *m_roomscale_sweep,

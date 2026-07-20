@@ -16,6 +16,7 @@
 
 #include "d3d12/DirectXTK.hpp"
 
+#include "ChromaVoid.hpp"
 #include "D3D12Component.hpp"
 
 //#define AFR_DEPTH_TEMP_DISABLED
@@ -271,6 +272,23 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
     const auto is_2d_screen = vr->is_using_2d_screen();
     const auto is_screen_capture = vr->is_using_screen_capture();
 
+    // Chroma void: the window texture's border is padded with the key color so the quad's
+    // screen-space edge blends key-on-key in the compositor; a game-colored edge would blend
+    // into un-keyable fringe.
+    // Chroma void state, evaluated once per frame. The pad = key border + content inset so the
+    // quad's screen-space edge blends key-on-key in the compositor.
+    const bool chroma_pad = vr->is_chroma_pad_active();
+    const auto void_color = vr->get_screen_capture_clear_color();
+
+    // The screen textures have UNORM views, so their ring takes the raw sRGB key (black while gated).
+    float ring_clear[4]{0.0f, 0.0f, 0.0f, 1.0f};
+    if (chroma_pad && !(void_color.x == 0.0f && void_color.y == 0.0f && void_color.z == 0.0f)) {
+        const auto key = vr->get_void_key_color_srgb();
+        ring_clear[0] = key.x;
+        ring_clear[1] = key.y;
+        ring_clear[2] = key.z;
+    }
+
     auto draw_2d_view = [&](d3d12::CommandContext& commands, ID3D12Resource* render_target) {
         if (ui_should_invert_alpha && m_game_ui_tex.texture.Get() != nullptr && m_game_ui_tex.srv_heap != nullptr) {
             d3d12::render_srv_to_rtv(m_ui_batch_alpha_invert.get(), commands.cmd_list.Get(), m_game_ui_tex, m_game_ui_tex, std::nullopt, ENGINE_SRC_COLOR, ENGINE_SRC_COLOR);
@@ -282,7 +300,13 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
             // In spatial mode the GUI toggle hides only the UI; the world stays on the quad.
             const bool composite_ui = is_2d_screen || vr->is_gui_enabled();
 
-            // Clear previous frame
+            const auto rt_size = g_framework->get_d3d12_rt_size();
+            const LONG pad = chroma_pad ? chroma::clamped_pad((LONG)rt_size.x, (LONG)rt_size.y) : 0;
+            const RECT content_dest{pad, pad, (LONG)rt_size.x - pad, (LONG)rt_size.y - pad};
+
+            // Clear previous frame. NB: transparent black even when chroma-padding -- the world
+            // composite blends premultiplied, so a key-colored underlay would add into every content
+            // pixel (alpha-0 games would tint fully key). The border ring is painted after compositing.
             for (auto& screen : m_2d_screen_tex) {
                 commands.clear_rtv(screen, clear_color, ENGINE_SRC_COLOR);
             }
@@ -294,6 +318,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                 m_game_tex,
                 m_2d_screen_tex[0],
                 RECT{0, 0, (LONG)((float)m_backbuffer_size[0] / 2.0f), (LONG)m_backbuffer_size[1]},
+                content_dest,
                 ENGINE_SRC_COLOR,
                 ENGINE_SRC_COLOR
             );
@@ -304,6 +329,8 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                     commands.cmd_list.Get(),
                     m_game_ui_tex,
                     m_2d_screen_tex[0],
+                    std::nullopt,
+                    content_dest,
                     ENGINE_SRC_COLOR,
                     ENGINE_SRC_COLOR
                 );
@@ -318,6 +345,8 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                         commands.cmd_list.Get(),
                         m_scene_capture_tex,
                         m_2d_screen_tex[1],
+                        std::nullopt,
+                        content_dest,
                         ENGINE_SRC_COLOR,
                         ENGINE_SRC_COLOR
                     );
@@ -328,6 +357,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                         m_game_tex,
                         m_2d_screen_tex[1],
                         RECT{(LONG)((float)m_backbuffer_size[0] / 2.0f), 0, (LONG)((float)m_backbuffer_size[0]), (LONG)m_backbuffer_size[1]},
+                        content_dest,
                         ENGINE_SRC_COLOR,
                         ENGINE_SRC_COLOR
                     );
@@ -339,9 +369,20 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
                         commands.cmd_list.Get(),
                         m_game_ui_tex,
                         m_2d_screen_tex[1],
+                        std::nullopt,
+                        content_dest,
                         ENGINE_SRC_COLOR,
                         ENGINE_SRC_COLOR
                     );
+                }
+            }
+
+            // Border ring in the key color (rect clears bypass blending, keeping the ring pure).
+            if (chroma_pad && pad > 0) {
+                const auto ring = chroma::border_ring((LONG)rt_size.x, (LONG)rt_size.y, pad);
+
+                for (auto& screen : m_2d_screen_tex) {
+                    commands.clear_rtv(screen, ring_clear, ring.data(), (uint32_t)ring.size(), ENGINE_SRC_COLOR);
                 }
             }
 
@@ -446,7 +487,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
         // OpenXR texture
         if (runtime->is_openxr() && vr->m_openxr->ready()) {
             if (is_screen_capture) {
-                // 2D/spatial: the projection layer is black by design -- clear instead of copying.
+                // 2D/spatial: the projection layer is void by design -- clear instead of copying.
                 m_openxr.clear((uint32_t)runtimes::OpenXR::SwapchainIndex::AFR_LEFT_EYE);
             } else {
                 D3D12_BOX src_box{};
@@ -504,7 +545,7 @@ vr::EVRCompositorError D3D12Component::on_frame(VR* vr) {
 
         // OpenXR texture
         if (runtime->is_openxr() && vr->m_openxr->ready()) {
-            // 2D/spatial: the projection layer is black by design -- clear the swapchains instead of
+            // 2D/spatial: the projection layer is void by design -- clear the swapchains instead of
             // copying, and skip depth (nothing to reproject).
             if (is_actually_afr && !is_afr && !m_submitted_left_eye) {
                 if (is_screen_capture) {
@@ -1309,9 +1350,9 @@ bool D3D12Component::setup() {
         bdrt.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
         m_ui_batch_alpha_invert = setup_sprite_batch_pso(
-            backbuffer_desc.Format, 
-            alpha_luminance_sprite_ps_SpritePixelShader, 
-            alpha_luminance_sprite_ps_SpriteVertexShader, 
+            backbuffer_desc.Format,
+            alpha_luminance_sprite_ps_SpritePixelShader,
+            alpha_luminance_sprite_ps_SpriteVertexShader,
             invert_alpha_in_place_pd
         );
     }
@@ -1901,8 +1942,37 @@ void D3D12Component::OpenXR::clear(uint32_t swapchain_idx) {
             }
         }
 
-        const float clear_color[4]{};
-        texture_ctx->commands.clear_rtv(*texture_ctx, clear_color, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        // Void color -- black, or the passthrough chroma key (already linear for the sRGB view).
+        const auto void_color = vr->get_screen_capture_clear_color();
+        const float key_color[4]{void_color.x, void_color.y, void_color.z, void_color.w};
+        const bool is_black = void_color.x == 0.0f && void_color.y == 0.0f && void_color.z == 0.0f;
+
+        if (is_black) {
+            texture_ctx->commands.clear_rtv(*texture_ctx, key_color, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        } else {
+            // Black base + inset key interior (per eye half on the double-wide): the layer's outer
+            // edge then blends black-on-black at a cropped-FOV boundary instead of flashing the key.
+            // The interior sits inside the submitted view-bounds region, not the texture edge.
+            const float black[4]{0.0f, 0.0f, 0.0f, 1.0f};
+            texture_ctx->commands.clear_rtv(*texture_ctx, black, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+            const auto desc = texture_ctx->texture->GetDesc();
+            const auto& bounds = vr->m_openxr->view_bounds;
+            const bool double_wide = swapchain_idx == (uint32_t)runtimes::OpenXR::SwapchainIndex::DOUBLE_WIDE;
+
+            if (double_wide) {
+                const auto eye_w = (LONG)desc.Width / 2;
+                const D3D12_RECT rects[2]{
+                    chroma::guard_interior(bounds[0], eye_w, (LONG)desc.Height, chroma::EDGE_GUARD_PX, 0),
+                    chroma::guard_interior(bounds[1], eye_w, (LONG)desc.Height, chroma::EDGE_GUARD_PX, eye_w)};
+                texture_ctx->commands.clear_rtv(*texture_ctx, key_color, rects, 2, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            } else {
+                const int eye = swapchain_idx == (uint32_t)runtimes::OpenXR::SwapchainIndex::AFR_RIGHT_EYE ? 1 : 0;
+                const auto rect = chroma::guard_interior(bounds[eye], (LONG)desc.Width, (LONG)desc.Height, chroma::EDGE_GUARD_PX, 0);
+                texture_ctx->commands.clear_rtv(*texture_ctx, key_color, &rect, 1, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            }
+        }
+
         texture_ctx->commands.execute();
     } else {
         spdlog::error("[VR] xrWaitSwapchainImage failed: {}", vr->m_openxr->get_result_string(result));

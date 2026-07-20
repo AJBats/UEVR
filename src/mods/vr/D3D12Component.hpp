@@ -176,7 +176,8 @@ private:
             this->copy(swapchain_idx, src, std::nullopt, std::nullopt, src_state, src_box);
         }
 
-        // Acquire + clear to black + release, without a source copy (2D/spatial projection layers).
+        // Acquire + clear to the void color (black, or the passthrough chroma key) + release,
+        // without a source copy (2D/spatial projection layers).
         void clear(uint32_t swapchain_idx);
         void wait_for_all_copies() {
             std::scoped_lock _{this->mtx};
